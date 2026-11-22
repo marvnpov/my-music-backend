@@ -1,3 +1,5 @@
+import os
+import tempfile
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from ytmusicapi import YTMusic
@@ -15,9 +17,19 @@ app.add_middleware(
 
 ytm = YTMusic()
 
+COOKIE_FILE = None
+raw_cookies = os.getenv("YT_COOKIES", "").strip()
+if raw_cookies:
+    tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt", encoding="utf-8")
+    tmp.write(raw_cookies)
+    tmp.close()
+    COOKIE_FILE = tmp.name
+
+
 @app.get("/")
 def health_check():
-    return {"status": "online"}
+    return {"status": "online", "cookies_loaded": bool(COOKIE_FILE)}
+
 
 @app.get("/api/home")
 def get_home():
@@ -25,8 +37,9 @@ def get_home():
     moods = ytm.get_mood_categories()
     return {
         "top_songs": charts.get("songs", {}).get("items", [])[:15],
-        "moods": moods
+        "moods": moods,
     }
+
 
 @app.get("/api/search")
 def search_songs(q: str):
@@ -37,7 +50,7 @@ def search_songs(q: str):
         cover = thumbnails[-1]["url"] if thumbnails else ""
         if "w120-h120" in cover:
             cover = cover.replace("w120-h120", "w544-h544")
-            
+
         artists = ", ".join([a["name"] for a in item.get("artists", [])])
         formatted.append({
             "videoId": item.get("videoId"),
@@ -45,9 +58,10 @@ def search_songs(q: str):
             "artist": artists,
             "album": item.get("album", {}).get("name") if item.get("album") else "Single",
             "duration": item.get("duration", "0:00"),
-            "cover": cover
+            "cover": cover,
         })
     return {"results": formatted}
+
 
 @app.get("/api/stream/{video_id}")
 def get_audio_stream(video_id: str):
@@ -56,28 +70,34 @@ def get_audio_stream(video_id: str):
         "format": "bestaudio[ext=m4a]/bestaudio",
         "quiet": True,
         "no_warnings": True,
+        "nocheckcertificate": True,
+        "remote_components": ["ejs:github"],
     }
+    if COOKIE_FILE:
+        ydl_opts["cookiefile"] = COOKIE_FILE
+
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             return {
                 "audioUrl": info["url"],
-                "duration": info.get("duration", 0)
+                "duration": info.get("duration", 0),
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/lyrics")
 async def get_synced_lyrics(title: str, artist: str):
     async with httpx.AsyncClient() as client:
         res = await client.get(
             "https://lrclib.net/api/get",
-            params={"track_name": title, "artist_name": artist}
+            params={"track_name": title, "artist_name": artist},
         )
         if res.status_code == 200:
             data = res.json()
             return {
                 "syncedLyrics": data.get("syncedLyrics"),
-                "plainLyrics": data.get("plainLyrics")
+                "plainLyrics": data.get("plainLyrics"),
             }
         return {"syncedLyrics": None, "plainLyrics": "Lyrics not found."}
