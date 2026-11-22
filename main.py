@@ -67,7 +67,7 @@ def search_songs(q: str):
 def get_audio_stream(video_id: str):
     url = f"https://music.youtube.com/watch?v={video_id}"
     ydl_opts = {
-        "format": "bestaudio[ext=m4a]/bestaudio",
+        "format": "bestaudio/best",
         "quiet": True,
         "no_warnings": True,
         "nocheckcertificate": True,
