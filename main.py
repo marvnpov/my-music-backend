@@ -66,25 +66,35 @@ def search_songs(q: str):
 @app.get("/api/stream/{video_id}")
 def get_audio_stream(video_id: str):
     url = f"https://music.youtube.com/watch?v={video_id}"
-    ydl_opts = {
-        "format": "bestaudio/best",
+    base_opts = {
         "quiet": True,
         "no_warnings": True,
         "nocheckcertificate": True,
         "remote_components": ["ejs:github"],
+        "extractor_args": {"youtube": {"player_client": ["android_vr", "web"]}},
     }
     if COOKIE_FILE:
-        ydl_opts["cookiefile"] = COOKIE_FILE
+        base_opts["cookiefile"] = COOKIE_FILE
 
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            return {
-                "audioUrl": info["url"],
-                "duration": info.get("duration", 0),
-            }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    for fmt in ["bestaudio/best", "best", None]:
+        opts = dict(base_opts)
+        if fmt:
+            opts["format"] = fmt
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                stream_url = info.get("url")
+                if not stream_url and info.get("requested_formats"):
+                    stream_url = info["requested_formats"][0].get("url")
+                if stream_url:
+                    return {
+                        "audioUrl": stream_url,
+                        "duration": info.get("duration", 0),
+                    }
+        except Exception:
+            continue
+
+    raise HTTPException(status_code=500, detail="Could not extract a playable stream format for this track.")
 
 
 @app.get("/api/lyrics")
